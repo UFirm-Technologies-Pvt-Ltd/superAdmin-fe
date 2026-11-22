@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Eye, EyeOff, ShieldCheck, Lock, Trash2, UserPlus, AlertCircle, Check, Mail, Send, KeyRound, Loader2 } from 'lucide-react';
-import { api } from '../api/client';
+import { api, API_BASE } from '../api/client';
 
 function formatToInputDate(val) {
   if (!val) return '';
@@ -219,14 +219,6 @@ export default function ClientModal({
     return `${prefix}_${randomHex}`;
   }
 
-  function handleAutoGenerateToken() {
-    const cleanName = (formData.clientName || 'client').toLowerCase().replace(/[^a-z0-9]/g, '_');
-    setFormData(prev => ({
-      ...prev,
-      authenticationToken: generateToken(cleanName)
-    }));
-  }
-
   const handleDeleteMasterUser = async () => {
     const targetUserId = existingUser?.userId ?? existingUser?.UserId;
     if (!initialData?.propertyId || !targetUserId) return;
@@ -249,6 +241,11 @@ export default function ClientModal({
     const targetEmail = existingUser?.email || existingUser?.Email;
     const targetUserId = existingUser?.userId ?? existingUser?.UserId;
     const propertyId = initialData?.propertyId;
+    if (!propertyId || !targetUserId) {
+      setError('Client ID and User ID are required to send password reset link.');
+      setIsConfirmingReset(false);
+      return;
+    }
     if (!targetEmail) {
       setError('No registered email found for this master user.');
       setIsConfirmingReset(false);
@@ -260,7 +257,7 @@ export default function ClientModal({
     setError('');
 
     try {
-      const res = await api.sendForgotPassword(propertyId, targetUserId, targetEmail);
+      const res = await api.sendForgotPassword(propertyId, targetUserId);
       setIsConfirmingReset(false);
       const msg = res?.message || `Password reset link sent to ${targetEmail}`;
       setResetFeedback({
@@ -374,9 +371,13 @@ export default function ClientModal({
 
       if (!isEdit) {
         payload.email = addUserData.email.trim();
+        payload.Email = addUserData.email.trim();
         payload.password = addUserData.password.trim();
+        payload.Password = addUserData.password.trim();
         payload.canAddUsers = Boolean(addUserData.canAddUsers);
+        payload.CanAddUsers = Boolean(addUserData.canAddUsers);
         payload.userIsActive = Boolean(addUserData.userIsActive);
+        payload.UserIsActive = Boolean(addUserData.userIsActive);
       } else {
         // Edit mode payload: pass exact DTO properties
         const mUserId = existingUser?.userId ?? existingUser?.UserId;
@@ -608,36 +609,6 @@ export default function ClientModal({
                 value={formData.validTill}
                 onChange={e => setFormData({ ...formData, validTill: e.target.value })}
                 required
-              />
-            </div>
-
-            {/* Authentication Token */}
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '5px' }}>
-                <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>
-                  Authentication Token
-                </label>
-                <button
-                  type="button"
-                  onClick={handleAutoGenerateToken}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--btn-primary-bg)',
-                    fontSize: '0.8rem',
-                    cursor: 'pointer',
-                    fontWeight: '700'
-                  }}
-                >
-                  Generate
-                </button>
-              </div>
-              <input
-                type="text"
-                placeholder="Authentication Token"
-                className="form-input"
-                value={formData.authenticationToken}
-                onChange={e => setFormData({ ...formData, authenticationToken: e.target.value })}
               />
             </div>
 

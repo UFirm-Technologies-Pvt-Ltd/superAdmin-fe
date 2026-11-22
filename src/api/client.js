@@ -1,5 +1,9 @@
 import { encryptPassword } from "./passwordCrypto.js";
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:5297';
+const rawApiBase = import.meta.env.VITE_API_BASE;
+if (!rawApiBase) {
+  throw new Error("[CONFIG_ERROR] VITE_API_BASE is required in environment. No fallback allowed.");
+}
+export const API_BASE = rawApiBase.replace(/\/+$/, '');
 
 export const TOKEN_KEY = 'firmity_superadmin_token';
 export const USER_KEY = 'firmity_superadmin_user';
@@ -149,6 +153,7 @@ export const api = {
   // Authentication
   async login(email, password) {
     const securePassword = await encryptPassword(password, API_BASE);
+
     const data = await request('/auth/superadmin/login', {
       method: 'POST',
       body: JSON.stringify({
@@ -175,7 +180,39 @@ export const api = {
     params.append('PageNumber', pageNumber.toString());
     params.append('PageSize', pageSize.toString());
 
-    return await request(`/api/MasterClient?${params.toString()}`);
+    const res = await request(`/api/MasterClient?${params.toString()}`);
+    const rawList = res?.items || res?.Items || (Array.isArray(res) ? res : []);
+    const items = rawList.map(c => {
+      const masterUser = c.masterUser || c.MasterUser;
+      return {
+        propertyId: c.propertyId ?? c.PropertyId,
+        clientName: c.clientName ?? c.ClientName,
+        dbIp: c.dbIp ?? c.DbIp,
+        dbUserName: c.dbUserName ?? c.DbUserName,
+        validTill: c.validTill ?? c.ValidTill,
+        isActive: (c.isActive ?? c.IsActive) !== false,
+        isDeleted: Boolean(c.isDeleted ?? c.IsDeleted),
+        authenticationToken: c.authenticationToken ?? c.AuthenticationToken,
+        createdOn: c.createdOn ?? c.CreatedOn,
+        updatedOn: c.updatedOn ?? c.UpdatedOn,
+        activationDate: c.activationDate ?? c.ActivationDate,
+        deactivationDate: c.deactivationDate ?? c.DeactivationDate,
+        masterUser: masterUser ? {
+          userId: masterUser.userId ?? masterUser.UserId,
+          email: masterUser.email ?? masterUser.Email,
+          canAddUsers: Boolean(masterUser.canAddUsers ?? masterUser.CanAddUsers),
+          isActive: (masterUser.isActive ?? masterUser.IsActive) !== false
+        } : null
+      };
+    });
+
+    return {
+      items,
+      totalCount: res?.totalCount ?? res?.TotalCount ?? items.length,
+      pageNumber: res?.pageNumber ?? res?.PageNumber ?? pageNumber,
+      pageSize: res?.pageSize ?? res?.PageSize ?? pageSize,
+      totalPages: res?.totalPages ?? res?.TotalPages ?? 1
+    };
   },
 
   async getClientById(id) {
@@ -236,17 +273,68 @@ export const api = {
   },
 
   // SEC-FIX-001: Authenticated administrative password reset dispatch.
-  // Replaces public anonymous /auth/forgot-password with tenant-scoped, audit-logged admin route.
-  async sendForgotPassword(propertyId, userId, email) {
-    if (propertyId && userId) {
-      return await request(`/api/MasterClient/${propertyId}/user/${userId}/send-reset-link`, {
-        method: 'POST'
-      });
+  // Directly targets the tenant-scoped admin route. No anonymous fallback allowed.
+  async sendForgotPassword(propertyId, userId) {
+    if (!propertyId || !userId) {
+      throw new Error("PropertyId and UserId are required to dispatch password reset link.");
     }
-    // Fallback if called without propertyId/userId
-    return await request('/auth/forgot-password', {
+    return await request(`/api/MasterClient/${propertyId}/user/${userId}/send-reset-link`, {
+      method: 'POST'
+    });
+  },
+
+  // Multi-Tenant Modular Subscriptions & Trials (Tabs 2 & 3)
+  async getAvailableModules() {
+    return await request('/api/ClientSubscription/modules');
+  },
+
+  async getPaidSubscriptions({ search = '', isActiveOnly = null, pageNumber = 1, pageSize = 100 } = {}) {
+    const params = new URLSearchParams();
+    if (search) params.append('Search', search);
+    if (isActiveOnly !== null && isActiveOnly !== undefined) params.append('IsActiveOnly', isActiveOnly.toString());
+    params.append('PageNumber', pageNumber.toString());
+    params.append('PageSize', pageSize.toString());
+    return await request(`/api/ClientSubscription/paid?${params.toString()}`);
+  },
+
+  async getClientPaidDetail(propertyId) {
+    return await request(`/api/ClientSubscription/paid/${propertyId}`);
+  },
+
+  async updatePaidSubscriptions(propertyId, data) {
+    return await request(`/api/ClientSubscription/paid/${propertyId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  },
+
+  async getTrials({ search = '', isActiveOnly = null, pageNumber = 1, pageSize = 100 } = {}) {
+    const params = new URLSearchParams();
+    if (search) params.append('Search', search);
+    if (isActiveOnly !== null && isActiveOnly !== undefined) params.append('IsActiveOnly', isActiveOnly.toString());
+    params.append('PageNumber', pageNumber.toString());
+    params.append('PageSize', pageSize.toString());
+    return await request(`/api/ClientSubscription/trials?${params.toString()}`);
+  },
+
+  async provisionTrial(data) {
+    return await request('/api/ClientSubscription/trials/provision', {
       method: 'POST',
-      body: JSON.stringify({ email: email ? email.trim() : '', Email: email ? email.trim() : '' })
+      body: JSON.stringify(data)
+    });
+  },
+
+  async updateTrials(propertyId, data) {
+    return await request(`/api/ClientSubscription/trials/${propertyId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  },
+
+  async convertTrialToPaid(data) {
+    return await request('/api/ClientSubscription/trials/convert-to-paid', {
+      method: 'POST',
+      body: JSON.stringify(data)
     });
   }
 };

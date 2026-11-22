@@ -1,12 +1,11 @@
 import React from 'react';
-import { Search, Plus, RefreshCw } from 'lucide-react';
+import { Search, Plus } from 'lucide-react';
 
 export default function FilterBar({
   search,
   onSearchChange,
   activeFilter, // null, true, false
   onFilterChange,
-  onRefresh,
   onOpenCreateModal,
   isLoading
 }) {
@@ -120,17 +119,6 @@ export default function FilterBar({
 
         {/* Action Buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <button
-            onClick={onRefresh}
-            className="btn-secondary"
-            disabled={isLoading}
-            title="Reload clients"
-            style={{ padding: '10px 18px', fontSize: '0.95rem', fontWeight: '600' }}
-          >
-            <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
-            <span>Refresh</span>
-          </button>
-
           <button
             onClick={onOpenCreateModal}
             className="btn-primary"

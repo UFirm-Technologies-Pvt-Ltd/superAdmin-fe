@@ -7,9 +7,13 @@ import ClientModal from '../components/ClientModal';
 import DeleteModal from '../components/DeleteModal';
 import StatusModal from '../components/StatusModal';
 import Toast from '../components/Toast';
+import SuperAdminTabs from '../components/SuperAdminTabs';
+import PaidSubscriptionsTab from '../components/PaidSubscriptionsTab';
+import TrialsTab from '../components/TrialsTab';
 import { api } from '../api/client';
 
 export default function ClientDashboard({ user, onLogout }) {
+  const [activeTab, setActiveTab] = useState('clients'); // 'clients' | 'paid' | 'trials'
   const [clients, setClients] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -31,9 +35,9 @@ export default function ClientDashboard({ user, onLogout }) {
   // Toast
   const [toast, setToast] = useState(null);
 
-  const showToast = (message, type = 'success') => {
+  const showToast = useCallback((message, type = 'success') => {
     setToast({ message, type });
-  };
+  }, []);
 
   const fetchClients = useCallback(async () => {
     setIsLoading(true);
@@ -44,28 +48,27 @@ export default function ClientDashboard({ user, onLogout }) {
         pageNumber: 1,
         pageSize: 100
       });
-      // Handle both PagedResult ({ items/Items }) and array
       const rawList = res?.items || res?.Items || (Array.isArray(res) ? res : []);
       const normalized = rawList.map(c => {
-        const mu = c.masterUser ?? c.MasterUser;
+        const masterUser = c.masterUser || c.MasterUser;
         return {
           propertyId: c.propertyId ?? c.PropertyId,
           clientName: c.clientName ?? c.ClientName,
           dbIp: c.dbIp ?? c.DbIp,
           dbUserName: c.dbUserName ?? c.DbUserName,
           validTill: c.validTill ?? c.ValidTill,
-          isActive: c.isActive ?? c.IsActive,
-          isDeleted: c.isDeleted ?? c.IsDeleted,
+          isActive: (c.isActive ?? c.IsActive) !== false,
+          isDeleted: Boolean(c.isDeleted ?? c.IsDeleted),
           authenticationToken: c.authenticationToken ?? c.AuthenticationToken,
           createdOn: c.createdOn ?? c.CreatedOn,
           updatedOn: c.updatedOn ?? c.UpdatedOn,
           activationDate: c.activationDate ?? c.ActivationDate,
           deactivationDate: c.deactivationDate ?? c.DeactivationDate,
-          masterUser: mu ? {
-            userId: mu.userId ?? mu.UserId,
-            email: mu.email ?? mu.Email,
-            canAddUsers: Boolean(mu.canAddUsers ?? mu.CanAddUsers),
-            isActive: (mu.isActive ?? mu.IsActive) !== false
+          masterUser: masterUser ? {
+            userId: masterUser.userId ?? masterUser.UserId,
+            email: masterUser.email ?? masterUser.Email,
+            canAddUsers: Boolean(masterUser.canAddUsers ?? masterUser.CanAddUsers),
+            isActive: (masterUser.isActive ?? masterUser.IsActive) !== false
           } : null
         };
       });
@@ -75,7 +78,7 @@ export default function ClientDashboard({ user, onLogout }) {
     } finally {
       setIsLoading(false);
     }
-  }, [search, activeFilter]);
+  }, [search, activeFilter, showToast]);
 
   useEffect(() => {
     fetchClients();
@@ -165,46 +168,60 @@ export default function ClientDashboard({ user, onLogout }) {
       <main style={{ maxWidth: '1360px', margin: '0 auto', padding: '0 24px' }}>
         
         {/* Page Header */}
-        <div style={{ marginBottom: '28px' }}>
-          <h1 style={{ fontSize: '1.9rem', fontWeight: '800', color: '#0F172A', marginBottom: '8px', letterSpacing: '-0.02em' }}>
-            Client Management
+        <div style={{ marginBottom: '20px' }}>
+          <h1 style={{ fontSize: '1.8rem', fontWeight: '800', color: '#0F172A', letterSpacing: '-0.02em', margin: 0 }}>
+            Client & Subscription Management
           </h1>
-          <p style={{ color: '#475569', fontSize: '1.05rem', fontWeight: '500' }}>
-            Manage client databases, host configurations, and access status.
-          </p>
         </div>
 
-        {/* Stats Cards */}
-        <StatsCards clients={clients} />
+        {/* 3 Tabs Navigation */}
+        <SuperAdminTabs activeTab={activeTab} onTabChange={setActiveTab} />
 
-        {/* Filters & Actions */}
-        <FilterBar
-          search={search}
-          onSearchChange={setSearch}
-          activeFilter={activeFilter}
-          onFilterChange={setActiveFilter}
-          onRefresh={fetchClients}
-          onOpenCreateModal={() => {
-            setEditingClient(null);
-            setIsClientModalOpen(true);
-          }}
-          isLoading={isLoading}
-        />
+        {/* TAB 1: Clients & DB Credentials */}
+        {activeTab === 'clients' && (
+          <>
+            {/* Stats Cards */}
+            <StatsCards clients={clients} />
 
-        {/* Clients Table */}
-        <ClientTable
-          clients={clients}
-          isLoading={isLoading}
-          onEdit={(client) => {
-            setEditingClient(client);
-            setIsClientModalOpen(true);
-          }}
-          onDelete={(client) => {
-            setDeletingClient(client);
-            setIsDeleteModalOpen(true);
-          }}
-          onToggleStatus={handleOpenStatusModal}
-        />
+            {/* Filters & Actions */}
+            <FilterBar
+              search={search}
+              onSearchChange={setSearch}
+              activeFilter={activeFilter}
+              onFilterChange={setActiveFilter}
+              onOpenCreateModal={() => {
+                setEditingClient(null);
+                setIsClientModalOpen(true);
+              }}
+              isLoading={isLoading}
+            />
+
+            {/* Clients Table */}
+            <ClientTable
+              clients={clients}
+              isLoading={isLoading}
+              onEdit={(client) => {
+                setEditingClient(client);
+                setIsClientModalOpen(true);
+              }}
+              onDelete={(client) => {
+                setDeletingClient(client);
+                setIsDeleteModalOpen(true);
+              }}
+              onToggleStatus={handleOpenStatusModal}
+            />
+          </>
+        )}
+
+        {/* TAB 2: Paid Subscriptions */}
+        {activeTab === 'paid' && (
+          <PaidSubscriptionsTab showToast={showToast} />
+        )}
+
+        {/* TAB 3: Client Trials */}
+        {activeTab === 'trials' && (
+          <TrialsTab showToast={showToast} />
+        )}
 
       </main>
 

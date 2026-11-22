@@ -4,6 +4,8 @@
  * Zero npm dependencies required.
  */
 
+const DEFAULT_KEY_TTL_MS = 60 * 60 * 1000; // 1 hour TTL
+
 let cachedKey = null;
 let keyFetchPromise = null;
 let serverTimeOffsetSec = 0;
@@ -32,11 +34,15 @@ function arrayBufferToBase64(buffer) {
 }
 
 async function getOrFetchEncryptionKey(apiBaseUrl = "") {
-  if (cachedKey) return cachedKey;
+  const now = Date.now();
+  if (cachedKey && cachedKey.expiresAt > now) {
+    return cachedKey;
+  }
 
   if (!keyFetchPromise) {
     keyFetchPromise = (async () => {
-      const normalizedBase = apiBaseUrl.replace(/\/+$/, "");
+      const base = apiBaseUrl || import.meta.env.VITE_API_BASE || "";
+      const normalizedBase = base.replace(/\/+$/, "");
       const response = await fetch(`${normalizedBase}/auth/encryption-key`, {
         headers: { Accept: "application/json" },
       });
@@ -67,9 +73,13 @@ async function getOrFetchEncryptionKey(apiBaseUrl = "") {
         ["encrypt"]
       );
 
+      const serverTtlSec = Number(data.keyTtlSec || data.KeyTtlSec || data.ttl || data.Ttl);
+      const ttlMs = serverTtlSec > 0 ? serverTtlSec * 1000 : DEFAULT_KEY_TTL_MS;
+
       cachedKey = {
         cryptoKey,
         keyId: data.keyId || data.KeyId || "1",
+        expiresAt: Date.now() + ttlMs,
       };
       return cachedKey;
     })().finally(() => {
@@ -83,10 +93,8 @@ async function getOrFetchEncryptionKey(apiBaseUrl = "") {
 export async function encryptPassword(plainPassword, apiBaseUrl = "") {
   if (!plainPassword) return plainPassword;
 
-  // Fallback if browser environment lacks WebCrypto
   if (!window.crypto || !window.crypto.subtle) {
-    console.warn("[SECURITY] Web Crypto API not available. Sending unencrypted fallback.");
-    return plainPassword;
+    throw new Error("[SECURITY_ERROR] Web Crypto API is unavailable. Secure HTTPS connection required.");
   }
 
   try {
@@ -105,9 +113,8 @@ export async function encryptPassword(plainPassword, apiBaseUrl = "") {
     const base64Cipher = arrayBufferToBase64(cipherBuffer);
     return `#ENC_AUTH:${keyId}:${clientTimestamp}:${base64Cipher}`;
   } catch (error) {
-    console.error("[SECURITY] Password encryption error:", error);
-    // Return original password so login can proceed via fallback if configured
-    return plainPassword;
+    console.error("[SECURITY] Password encryption failed:", error);
+    throw new Error(`[ENCRYPTION_FAILED] Password encryption failed: ${error.message}`);
   }
 }
 
