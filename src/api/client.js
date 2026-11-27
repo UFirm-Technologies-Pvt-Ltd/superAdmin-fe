@@ -77,7 +77,41 @@ export function getCurrentUser() {
   return null;
 }
 
-async function request(endpoint, options = {}) {
+let _refreshPromise = null;
+
+async function refreshAccessToken() {
+  if (_refreshPromise) return _refreshPromise;
+
+  _refreshPromise = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/auth/refresh`, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include',
+        body: JSON.stringify({ deviceType: 'web', scope: 'superadmin' })
+      });
+
+      if (!res.ok) return null;
+
+      const data = await res.json();
+      if (!data?.accessToken) return null;
+
+      setSession(data.accessToken, getCurrentUser());
+      return data.accessToken;
+    } catch {
+      return null;
+    } finally {
+      _refreshPromise = null;
+    }
+  })();
+
+  return _refreshPromise;
+}
+
+async function request(endpoint, options = {}, _retried = false) {
   const token = getToken();
   const headers = {
     'Accept': 'application/json',
@@ -88,12 +122,13 @@ async function request(endpoint, options = {}) {
     headers['Content-Type'] = 'application/json';
   }
 
-  if (token && !endpoint.includes('/login')) {
+  if (token && !endpoint.includes('/login') && !endpoint.includes('/auth/2fa/')) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
   const response = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
+    credentials: options.credentials ?? 'include',
     headers
   });
 
@@ -125,7 +160,14 @@ async function request(endpoint, options = {}) {
   };
 
   if (response.status === 401) {
-    if (!endpoint.includes('/login')) {
+    const isAuthChallenge = endpoint.includes('/login') || endpoint.includes('/auth/2fa/') || endpoint.includes('/auth/refresh');
+    if (!isAuthChallenge && !_retried) {
+      const freshToken = await refreshAccessToken();
+      if (freshToken) {
+        return request(endpoint, options, true);
+      }
+    }
+    if (!isAuthChallenge) {
       clearSession();
       window.dispatchEvent(new CustomEvent('auth:unauthorized'));
     }
@@ -162,11 +204,65 @@ export const api = {
         deviceType: 'web'
       })
     });
+
+    if (data?.requires2Fa) {
+      if (!data.twoFactorTicket) {
+        throw new Error('Authentication server did not issue a valid verification ticket.');
+      }
+      return data;
+    }
+
+    if (!data?.accessToken) {
+      throw new Error('Authentication server did not return an access token.');
+    }
+
     setSession(data.accessToken, data.user);
     return data;
   },
 
+  async verifyTwoFactor(twoFactorTicket, otp) {
+    if (!twoFactorTicket) {
+      throw new Error('Verification session is missing. Please sign in again.');
+    }
+    const data = await request('/auth/2fa/verify', {
+      method: 'POST',
+      body: JSON.stringify({
+        twoFactorTicket,
+        otp: String(otp || '').trim()
+      })
+    });
+
+    if (!data?.accessToken) {
+      throw new Error('Verification succeeded but no access token was returned.');
+    }
+
+    setSession(data.accessToken, data.user);
+    return data;
+  },
+
+  async resendTwoFactor(twoFactorTicket) {
+    if (!twoFactorTicket) {
+      throw new Error('Verification session is missing. Please sign in again.');
+    }
+    return await request('/auth/2fa/resend', {
+      method: 'POST',
+      body: JSON.stringify({ twoFactorTicket })
+    });
+  },
+
   logout() {
+    const token = getToken();
+    if (token) {
+      fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        credentials: 'include',
+        body: JSON.stringify({ deviceType: 'web', scope: 'superadmin' })
+      }).catch(() => {});
+    }
     clearSession();
   },
 
